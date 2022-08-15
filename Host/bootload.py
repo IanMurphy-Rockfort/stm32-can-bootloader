@@ -145,6 +145,7 @@ class CANProgrammer(tk.Tk):
         for idx, page in enumerate(self.pages):
             hdr = b'\x02' + idx.to_bytes(1, 'little') + page.crc.to_bytes(4, 'little')
             self.hw.sendMessage(CAN_ID, hdr)
+            time.sleep(0.010)
             
             for i in range(0, int(PAGE_SIZE / 8)):
                 chunk = page.data[8 * i : 8 * i + 8]
@@ -152,12 +153,12 @@ class CANProgrammer(tk.Tk):
                 self.bytes += 1
                 self.progress["value"] = self.bytes
                 self.status.set("Sending page %d (%d of %d)" % (idx, i * 8 + 8, PAGE_SIZE))
-                time.sleep(0.005)
+                time.sleep(0.010)
                 self.update()
 
             self.status.set("Wait to program page %d" % idx)
             self.update()
-            time.sleep(0.5)
+            time.sleep(1.0)
 
         self.finished()
 
