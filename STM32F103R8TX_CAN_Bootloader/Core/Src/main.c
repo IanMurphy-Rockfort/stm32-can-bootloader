@@ -18,8 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "stm32f1xx_hal.h"
 
+/* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
 
@@ -45,8 +45,22 @@ typedef void (*pFunction)(void);
 
 /* USER CODE END Includes */
 
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
 /* Private variables ---------------------------------------------------------*/
-CAN_HandleTypeDef hcan;
+ CAN_HandleTypeDef hcan;
 
 CRC_HandleTypeDef hcrc;
 
@@ -70,21 +84,21 @@ volatile uint8_t              blState;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 static void MX_CRC_Init(void);
-
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 
 /* USER CODE END PFP */
 
+/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void JumpToApplication()
 {
   JumpAddress = *(__IO pFunction*)(MAIN_PROGRAM_START_ADDRESS + 4);
   __set_MSP(*(__IO uint32_t*) MAIN_PROGRAM_START_ADDRESS);
+  SCB->VTOR = MAIN_PROGRAM_START_ADDRESS;
   HAL_DeInit();
   JumpAddress();
 }
@@ -181,27 +195,37 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* CanHandle)
 }
 /* USER CODE END 0 */
 
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
+  /* USER CODE BEGIN 1 */
 
-    /* USER CODE BEGIN 1 */
+  /* USER CODE END 1 */
 
-    /* USER CODE END 1 */
+  /* MCU Configuration--------------------------------------------------------*/
 
-    /* MCU Configuration----------------------------------------------------------*/
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
 
-    /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-    HAL_Init();
+  /* USER CODE BEGIN Init */
 
-    /* Configure the system clock */
-    SystemClock_Config();
+  /* USER CODE END Init */
 
-    /* Initialize all configured peripherals */
-    MX_GPIO_Init();
-    MX_CAN_Init();
-    MX_CRC_Init();
+  /* Configure the system clock */
+  SystemClock_Config();
 
-    /* USER CODE BEGIN 2 */
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_CAN_Init();
+  MX_CRC_Init();
+  /* USER CODE BEGIN 2 */
 
     CAN_FilterTypeDef canFilterConfig;
     canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
@@ -227,19 +251,18 @@ int main(void)
         JumpToApplication();
     }
 
-    /* USER CODE END 2 */
+  /* USER CODE END 2 */
 
-    /* Infinite loop */
-    /* USER CODE BEGIN WHILE */
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
     while (1)
     {
-        /* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
-        /* USER CODE BEGIN 3 */
+    /* USER CODE BEGIN 3 */
 
     }
-    /* USER CODE END 3 */
-
+  /* USER CODE END 3 */
 }
 
 /**
@@ -296,7 +319,7 @@ static void MX_CAN_Init(void)
 
   /* USER CODE END CAN_Init 1 */
   hcan.Instance = CAN1;
-  hcan.Init.Prescaler = 4;
+  hcan.Init.Prescaler = 2;
   hcan.Init.Mode = CAN_MODE_NORMAL;
   hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
   hcan.Init.TimeSeg1 = CAN_BS1_8TQ;

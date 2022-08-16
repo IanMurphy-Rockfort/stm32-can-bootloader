@@ -8,7 +8,8 @@
 #define LED_ERR 8
 #define CMD_LEN (sizeof("T12345678811223344556677881234\r")+1)
 
-int g_can_speed = CANSPEED_500; // default: 500k
+//int g_can_speed = CANSPEED_500; // default: 500k
+int g_can_speed = CANSPEED_1000; // 1Mbps
 int g_ts_en = 0;
 
 // the setup function runs once when you press reset or power the board
