@@ -1,39 +1,25 @@
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * File Name          : main.c
-  * Description        : Main program body
+  * @file           : main.c
+  * @brief          : Main program body
   ******************************************************************************
+  * @attention
   *
-  * COPYRIGHT(c) 2022 STMicroelectronics
+  * Copyright (c) 2022 STMicroelectronics.
+  * All rights reserved.
   *
-  * Redistribution and use in source and binary forms, with or without modification,
-  * are permitted provided that the following conditions are met:
-  *   1. Redistributions of source code must retain the above copyright notice,
-  *      this list of conditions and the following disclaimer.
-  *   2. Redistributions in binary form must reproduce the above copyright notice,
-  *      this list of conditions and the following disclaimer in the documentation
-  *      and/or other materials provided with the distribution.
-  *   3. Neither the name of STMicroelectronics nor the names of its contributors
-  *      may be used to endorse or promote products derived from this software
-  *      without specific prior written permission.
-  *
-  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
   *
   ******************************************************************************
   */
+/* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "stm32f1xx_hal.h"
 
+/* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
 
@@ -59,6 +45,20 @@ typedef void (*pFunction)(void);
 
 /* USER CODE END Includes */
 
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
 
@@ -66,8 +66,10 @@ CRC_HandleTypeDef hcrc;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-static CanTxMsgTypeDef        canTxMessage;
-static CanRxMsgTypeDef        canRxMessage;
+static CAN_TxHeaderTypeDef can_tx_header;
+static CAN_RxHeaderTypeDef can_rx_header;
+static uint8_t can_rx_data[8];
+static uint8_t can_tx_data[8];
 static FLASH_EraseInitTypeDef eraseInitStruct;
 
 pFunction                     JumpAddress;
@@ -82,16 +84,15 @@ volatile uint8_t              blState;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN_Init(void);
 static void MX_CRC_Init(void);
-
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 
 /* USER CODE END PFP */
 
+/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void Flash_BluePill_LED(uint8_t times, uint8_t rate)
 {
@@ -115,182 +116,193 @@ void JumpToApplication()
 
 void TransmitResponsePacket(uint8_t response)
 {
-  hcan.pTxMsg->StdId = DEVICE_CAN_ID;
-  hcan.pTxMsg->DLC = 1;
-  hcan.pTxMsg->Data[0] = response;
-  HAL_CAN_Transmit_IT(&hcan);
+	uint32_t mailbox;
+
+	can_tx_header.StdId = DEVICE_CAN_ID+1;
+    can_tx_header.DLC = 1;
+    can_tx_header.IDE = CAN_ID_STD;
+    can_tx_data[0] = response;
+    HAL_CAN_AddTxMessage(&hcan, &can_tx_header, can_tx_data, &mailbox);
 }
 
-void HAL_CAN_RxCpltCallback(CAN_HandleTypeDef* CanHandle)
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* CanHandle)
 {
-  // Skip messages not intended for our device
-  if (CanHandle->pRxMsg->StdId != DEVICE_CAN_ID) {
-    HAL_CAN_Receive_IT(&hcan, CAN_FIFO0);
-    return;
-  }
+	HAL_CAN_GetRxMessage(CanHandle, CAN_RX_FIFO0, &can_rx_header, can_rx_data);
 
-  if (blState == PAGE_PROG)
-  {
-    memcpy(&PageBuffer[PageBufferPtr],
-      CanHandle->pRxMsg->Data,
-      CanHandle->pRxMsg->DLC);
-    PageBufferPtr += CanHandle->pRxMsg->DLC;
+	if (can_rx_header.StdId != DEVICE_CAN_ID)
+	{
+		return;
+	}
 
-    if (PageBufferPtr == FLASH_PAGE_SIZE) {
-      HAL_NVIC_DisableIRQ(USB_LP_CAN1_RX0_IRQn);
+	if (blState == PAGE_PROG)
+	{
+        memcpy(&PageBuffer[PageBufferPtr], can_rx_data, can_rx_header.DLC);
+        PageBufferPtr += can_rx_header.DLC;
 
-      uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)PageBuffer, FLASH_PAGE_SIZE / 4);
-
-      if (crc == PageCRC && PageIndex <= NUM_OF_PAGES)
-      {
-        HAL_FLASH_Unlock();
-
-        uint32_t PageError = 0;
-
-        eraseInitStruct.TypeErase = TYPEERASE_PAGES;
-        eraseInitStruct.PageAddress = MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE;
-        eraseInitStruct.NbPages = 1;
-
-        HAL_FLASHEx_Erase(&eraseInitStruct, &PageError);
-
-        for (int i = 0; i < FLASH_PAGE_SIZE; i += 4)
+        if (PageBufferPtr == FLASH_PAGE_SIZE)
         {
-          HAL_FLASH_Program(TYPEPROGRAM_WORD, MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE + i, *(uint32_t*)&PageBuffer[i]);
+        	HAL_NVIC_DisableIRQ(USB_LP_CAN1_RX0_IRQn);
+        	uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)PageBuffer, FLASH_PAGE_SIZE / 4);
+
+        	if (crc == PageCRC && PageIndex <= NUM_OF_PAGES)
+        	{
+        		HAL_FLASH_Unlock();
+
+        		uint32_t PageError = 0;
+
+        		eraseInitStruct.TypeErase = TYPEERASE_PAGES;
+        		eraseInitStruct.PageAddress = MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE;
+        		eraseInitStruct.NbPages = 1;
+
+        		HAL_FLASHEx_Erase(&eraseInitStruct, &PageError);
+
+        		for (int i = 0; i < FLASH_PAGE_SIZE; i += 4)
+        		{
+        			HAL_FLASH_Program(TYPEPROGRAM_WORD, MAIN_PROGRAM_START_ADDRESS + PageIndex * FLASH_PAGE_SIZE + i, *(uint32_t*)&PageBuffer[i]);
+        		}
+
+        		HAL_FLASH_Lock();
+
+        		TransmitResponsePacket(CAN_RESP_OK);
+        	}
+        	else
+        	{
+        		TransmitResponsePacket(CAN_RESP_ERROR);
+        	}
+
+        	blState = IDLE;
+
+        	HAL_NVIC_EnableIRQ(USB_LP_CAN1_RX0_IRQn);
         }
 
-        HAL_FLASH_Lock();
+        return;
+	}
 
-        TransmitResponsePacket(CAN_RESP_OK);
-      }
-      else
-      {
-        TransmitResponsePacket(CAN_RESP_ERROR);
-      }
+    switch(can_rx_data[0])
+    {
+    	case CMD_HOST_INIT:
+    		blState = IDLE;
+    		TransmitResponsePacket(CAN_RESP_OK);
+    		break;
 
-      blState = IDLE;
+    	case CMD_PAGE_PROG:
+    		if (blState == IDLE)
+    		{
+    			memset(PageBuffer, 0, FLASH_PAGE_SIZE);
+    			memcpy(&PageCRC, &can_rx_data[2], sizeof(int));
+    			PageIndex = can_rx_data[1];
+    			blState = PAGE_PROG;
+    			PageBufferPtr = 0;
+    		}
+    		break;
 
-      HAL_NVIC_EnableIRQ(USB_LP_CAN1_RX0_IRQn);
+    	case CMD_BOOT:
+    		TransmitResponsePacket(CAN_RESP_OK);
+    		JumpToApplication();
+    		break;
+
+    	default:
+    		break;
     }
-
-    HAL_CAN_Receive_IT(&hcan, CAN_FIFO0);
-
-    return;
-  }
-
-  switch(CanHandle->pRxMsg->Data[0])
-  {
-    case CMD_HOST_INIT:
-      blState = IDLE;
-      TransmitResponsePacket(CAN_RESP_OK);
-      break;
-    case CMD_PAGE_PROG:
-      if (blState == IDLE) {
-        memset(PageBuffer, 0, FLASH_PAGE_SIZE);
-        memcpy(&PageCRC, &CanHandle->pRxMsg->Data[2], sizeof(int));
-        PageIndex = CanHandle->pRxMsg->Data[1];
-        blState = PAGE_PROG;
-        PageBufferPtr = 0;
-      } else {
-        // Should never get here
-      }
-      break;
-    case CMD_BOOT:
-      TransmitResponsePacket(CAN_RESP_OK);
-      JumpToApplication();
-      break;
-    default:
-      break;
-  }
-
-  HAL_CAN_Receive_IT(&hcan, CAN_FIFO0);
 }
 /* USER CODE END 0 */
 
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
 
-  /* MCU Configuration----------------------------------------------------------*/
+  /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
   /* Configure the system clock */
   SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN_Init();
   MX_CRC_Init();
-
   /* USER CODE BEGIN 2 */
-  hcan.pTxMsg = &canTxMessage;
-  hcan.pRxMsg = &canRxMessage;
 
-  CAN_FilterConfTypeDef canFilterConfig;
-  canFilterConfig.FilterNumber = 0;
+  CAN_FilterTypeDef canFilterConfig;
   canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
   canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
   canFilterConfig.FilterIdHigh = 0x0000;
   canFilterConfig.FilterIdLow = 0x0000;
   canFilterConfig.FilterMaskIdHigh = 0x0000 << 5;
   canFilterConfig.FilterMaskIdLow = 0x0000;
-  canFilterConfig.FilterFIFOAssignment = 0;
-  canFilterConfig.FilterActivation = ENABLE;
-  canFilterConfig.BankNumber = 1;
+  canFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  canFilterConfig.FilterActivation = CAN_FILTER_ENABLE;
+  canFilterConfig.FilterBank = 0;
   HAL_CAN_ConfigFilter(&hcan, &canFilterConfig);
 
-  HAL_CAN_Receive_IT(&hcan, CAN_FIFO0);
+  HAL_CAN_Start(&hcan);
+  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
 
   //HAL_Delay(1000);
+  TransmitResponsePacket(0x00);
   Flash_BluePill_LED(10,100);
 
   // Timed out waiting for host
-  if (blState == WAIT_HOST) {
+  if (blState == WAIT_HOST)
+  {
     JumpToApplication();
   }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-  /* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
-  /* USER CODE BEGIN 3 */
+    /* USER CODE BEGIN 3 */
 
   }
   /* USER CODE END 3 */
-
 }
 
-/** System Clock Configuration
-*/
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  RCC_OscInitTypeDef RCC_OscInitStruct;
-  RCC_ClkInitTypeDef RCC_ClkInitStruct;
-
-    /**Initializes the CPU, AHB and APB busses clocks
-    */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL6;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL12;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
 
-    /**Initializes the CPU, AHB and APB busses clocks
-    */
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -302,69 +314,82 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-
-    /**Configure the Systick interrupt time
-    */
-  HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
-
-    /**Configure the Systick
-    */
-  HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
-
-  /* SysTick_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
-/* CAN init function */
+/**
+  * @brief CAN Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_CAN_Init(void)
 {
 
+  /* USER CODE BEGIN CAN_Init 0 */
+
+  /* USER CODE END CAN_Init 0 */
+
+  /* USER CODE BEGIN CAN_Init 1 */
+
+  /* USER CODE END CAN_Init 1 */
   hcan.Instance = CAN1;
-  hcan.Init.Prescaler = 2;
+  hcan.Init.Prescaler = 4;
   hcan.Init.Mode = CAN_MODE_NORMAL;
-  hcan.Init.SJW = CAN_SJW_1TQ;
-  hcan.Init.BS1 = CAN_BS1_5TQ;
-  hcan.Init.BS2 = CAN_BS2_6TQ;
-  hcan.Init.TTCM = DISABLE;
-  hcan.Init.ABOM = DISABLE;
-  hcan.Init.AWUM = DISABLE;
-  hcan.Init.NART = ENABLE;
-  hcan.Init.RFLM = DISABLE;
-  hcan.Init.TXFP = DISABLE;
+  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_5TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_6TQ;
+  hcan.Init.TimeTriggeredMode = DISABLE;
+  hcan.Init.AutoBusOff = DISABLE;
+  hcan.Init.AutoWakeUp = DISABLE;
+  hcan.Init.AutoRetransmission = ENABLE;
+  hcan.Init.ReceiveFifoLocked = DISABLE;
+  hcan.Init.TransmitFifoPriority = DISABLE;
   if (HAL_CAN_Init(&hcan) != HAL_OK)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN CAN_Init 2 */
+
+  /* USER CODE END CAN_Init 2 */
 
 }
 
-/* CRC init function */
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_CRC_Init(void)
 {
 
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
   hcrc.Instance = CRC;
   if (HAL_CRC_Init(&hcrc) != HAL_OK)
   {
     Error_Handler();
   }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
 
 }
 
-/** Configure pins as
-        * Analog
-        * Input
-        * Output
-        * EVENT_OUT
-        * EXTI
-*/
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
 static void MX_GPIO_Init(void)
 {
-
-  GPIO_InitTypeDef GPIO_InitStruct;
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
@@ -374,6 +399,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : BluePill_LED_Pin */
   GPIO_InitStruct.Pin = BluePill_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BluePill_LED_GPIO_Port, &GPIO_InitStruct);
 
@@ -385,45 +411,32 @@ static void MX_GPIO_Init(void)
 
 /**
   * @brief  This function is executed in case of error occurrence.
-  * @param  None
   * @retval None
   */
 void Error_Handler(void)
 {
-  /* USER CODE BEGIN Error_Handler */
+  /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  while(1) 
+  __disable_irq();
+  while (1)
   {
   }
-  /* USER CODE END Error_Handler */
+  /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef USE_FULL_ASSERT
-
+#ifdef  USE_FULL_ASSERT
 /**
-   * @brief Reports the name of the source file and the source line number
-   * where the assert_param error has occurred.
-   * @param file: pointer to the source file name
-   * @param line: assert_param error line source number
-   * @retval None
-   */
-void assert_failed(uint8_t* file, uint32_t line)
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
-
 }
-
-#endif
-
-/**
-  * @}
-  */
-
-/**
-  * @}
-*/
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+#endif /* USE_FULL_ASSERT */
